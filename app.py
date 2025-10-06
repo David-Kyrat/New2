@@ -11,7 +11,7 @@ def download_data(tickers, start_date, end_date):
     """Download historical data for multiple tickers in one batch call."""
     if not tickers:
         return None
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False)
+    data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
     if len(tickers) == 1:
         return pd.DataFrame({tickers[0]: data['Adj Close']})
     return data['Adj Close']
@@ -35,6 +35,17 @@ def calculate_max_drawdown(portfolio_values):
     cumulative_max = portfolio_values.cummax()
     drawdown = (portfolio_values - cumulative_max) / cumulative_max * 100
     return drawdown.min()
+
+def calculate_sharpe_ratio(portfolio_values, risk_free_rate=0.0):
+    """Calculate annualized Sharpe ratio."""
+    returns = portfolio_values.pct_change().dropna()
+    if len(returns) == 0:
+        return 0.0
+    excess_returns = returns - (risk_free_rate / 252)
+    if excess_returns.std() == 0:
+        return 0.0
+    sharpe = excess_returns.mean() / excess_returns.std() * np.sqrt(252)
+    return sharpe
 
 def parse_portfolio_input(input_string):
     """Parse ticker:shares input string."""
@@ -153,7 +164,11 @@ if holdings:
                     st.metric("Max Drawdown", "N/A")
             
             with col7:
-                st.metric("Days", len(portfolio_value))
+                if len(portfolio_value) > 1:
+                    sharpe = calculate_sharpe_ratio(portfolio_value)
+                    st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                else:
+                    st.metric("Sharpe Ratio", "N/A")
             
             with col8:
                 st.metric("Holdings", len(holdings))
