@@ -3,21 +3,46 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from typing import Optional, Dict, List
 
 st.set_page_config(page_title="Portfolio Performance", layout="wide")
 
 @st.cache_data(ttl=3600)
-def download_data(tickers, start_date, end_date):
-    """Download historical data for multiple tickers in one batch call."""
+def download_data(
+    tickers: List[str], 
+    start_date: datetime, 
+    end_date: datetime
+) -> Optional[pd.DataFrame]:
+    """Download adjusted close prices for multiple tickers via yfinance.
+
+    Fetches historical data in a single batch call for efficiency. Uses
+    auto_adjust=False to ensure Adj Close column availability.
+
+    Args:
+        tickers: List of ticker symbols (e.g., ['AAPL', 'MSFT']).
+        start_date: Start date for historical data.
+        end_date: End date for historical data.
+
+    Returns:
+        DataFrame with tickers as columns and dates as index, or None if empty.
+    """
     if not tickers:
         return None
     data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
-    if len(tickers) == 1:
-        return pd.DataFrame({tickers[0]: data['Adj Close']})
     return data['Adj Close']
 
-def calculate_cagr(portfolio_values):
-    """Calculate Compound Annual Growth Rate."""
+def compute_cagr(portfolio_values: pd.Series) -> float:
+    """Compute Compound Annual Growth Rate (CAGR).
+
+    Computes annualized return assuming continuous compounding over the
+    entire period spanned by portfolio_values.
+
+    Args:
+        portfolio_values: Time series of portfolio values with DatetimeIndex.
+
+    Returns:
+        CAGR as a percentage. Returns 0.0 if period is zero days.
+    """
     days = (portfolio_values.index[-1] - portfolio_values.index[0]).days
     if days == 0:
         return 0.0
@@ -25,19 +50,44 @@ def calculate_cagr(portfolio_values):
     total_return = portfolio_values.iloc[-1] / portfolio_values.iloc[0]
     return (total_return ** (1 / years) - 1) * 100
 
-def calculate_volatility(portfolio_values):
-    """Calculate annualized volatility."""
+def compute_volatility(portfolio_values: pd.Series) -> float:
+    """Compute annualized volatility (standard deviation of returns).
+
+    Args:
+        portfolio_values: Time series of portfolio values with DatetimeIndex.
+
+    Returns:
+        Annualized volatility as a percentage (daily std * √252).
+    """
     returns = portfolio_values.pct_change().dropna()
     return returns.std() * np.sqrt(252) * 100
 
-def calculate_max_drawdown(portfolio_values):
-    """Calculate maximum drawdown."""
+def compute_max_drawdown(portfolio_values: pd.Series) -> float:
+    """Compute maximum drawdown as peak-to-trough decline.
+
+    Args:
+        portfolio_values: Time series of portfolio values with DatetimeIndex.
+
+    Returns:
+        Maximum drawdown as a percentage (negative value).
+    """
     cumulative_max = portfolio_values.cummax()
     drawdown = (portfolio_values - cumulative_max) / cumulative_max * 100
     return drawdown.min()
 
-def calculate_sharpe_ratio(portfolio_values, risk_free_rate=0.0):
-    """Calculate annualized Sharpe ratio."""
+def compute_sharpe_ratio(
+    portfolio_values: pd.Series, 
+    risk_free_rate: float = 0.0
+) -> float:
+    """Compute annualized Sharpe ratio (risk-adjusted return).
+
+    Args:
+        portfolio_values: Time series of portfolio values with DatetimeIndex.
+        risk_free_rate: Annual risk-free rate as decimal (default 0.0).
+
+    Returns:
+        Annualized Sharpe ratio. Returns 0.0 if std is zero or no returns.
+    """
     returns = portfolio_values.pct_change().dropna()
     if len(returns) == 0:
         return 0.0
@@ -47,8 +97,18 @@ def calculate_sharpe_ratio(portfolio_values, risk_free_rate=0.0):
     sharpe = excess_returns.mean() / excess_returns.std() * np.sqrt(252)
     return sharpe
 
-def parse_portfolio_input(input_string):
-    """Parse ticker:shares input string."""
+def parse_portfolio_input(input_string: str) -> Dict[str, float]:
+    """Parse user input string into ticker-shares mapping.
+
+    Expects format: 'TICKER:SHARES, TICKER2:SHARES2, ...'. Ignores invalid
+    entries and displays warnings via Streamlit sidebar.
+
+    Args:
+        input_string: Raw user input (e.g., 'AAPL:10, MSFT:5').
+
+    Returns:
+        Dictionary mapping ticker symbols to share counts (positive floats only).
+    """
     holdings = {}
     if not input_string.strip():
         return holdings
@@ -122,7 +182,7 @@ if holdings:
         portfolio_value = portfolio_value.dropna()
         
         if len(portfolio_value) > 0:
-            # Calculate metrics
+            # Compute metrics
             initial_value = portfolio_value.iloc[0]
             final_value = portfolio_value.iloc[-1]
             total_return = ((final_value - initial_value) / initial_value) * 100
@@ -138,14 +198,14 @@ if holdings:
             
             with col3:
                 if len(portfolio_value) > 1:
-                    cagr = calculate_cagr(portfolio_value)
+                    cagr = compute_cagr(portfolio_value)
                     st.metric("CAGR", f"{cagr:.2f}%")
                 else:
                     st.metric("CAGR", "N/A")
             
             with col4:
                 if len(portfolio_value) > 1:
-                    volatility = calculate_volatility(portfolio_value)
+                    volatility = compute_volatility(portfolio_value)
                     st.metric("Volatility (Ann.)", f"{volatility:.2f}%")
                 else:
                     st.metric("Volatility", "N/A")
@@ -158,14 +218,14 @@ if holdings:
             
             with col6:
                 if len(portfolio_value) > 1:
-                    max_dd = calculate_max_drawdown(portfolio_value)
+                    max_dd = compute_max_drawdown(portfolio_value)
                     st.metric("Max Drawdown", f"{max_dd:.2f}%")
                 else:
                     st.metric("Max Drawdown", "N/A")
             
             with col7:
                 if len(portfolio_value) > 1:
-                    sharpe = calculate_sharpe_ratio(portfolio_value)
+                    sharpe = compute_sharpe_ratio(portfolio_value)
                     st.metric("Sharpe Ratio", f"{sharpe:.2f}")
                 else:
                     st.metric("Sharpe Ratio", "N/A")
