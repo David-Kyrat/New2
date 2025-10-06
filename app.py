@@ -31,8 +31,8 @@ def download_data(
     data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
     return data['Adj Close']
 
-def calculate_cagr(portfolio_values: pd.Series) -> float:
-    """Calculate Compound Annual Growth Rate (CAGR).
+def compute_cagr(portfolio_values: pd.Series) -> float:
+    """Compute Compound Annual Growth Rate (CAGR).
 
     Computes annualized return assuming continuous compounding over the
     entire period spanned by portfolio_values.
@@ -50,8 +50,8 @@ def calculate_cagr(portfolio_values: pd.Series) -> float:
     total_return = portfolio_values.iloc[-1] / portfolio_values.iloc[0]
     return (total_return ** (1 / years) - 1) * 100
 
-def calculate_volatility(portfolio_values: pd.Series) -> float:
-    """Calculate annualized volatility (standard deviation of returns).
+def compute_volatility(portfolio_values: pd.Series) -> float:
+    """Compute annualized volatility (standard deviation of returns).
 
     Args:
         portfolio_values: Time series of portfolio values with DatetimeIndex.
@@ -62,8 +62,8 @@ def calculate_volatility(portfolio_values: pd.Series) -> float:
     returns = portfolio_values.pct_change().dropna()
     return returns.std() * np.sqrt(252) * 100
 
-def calculate_max_drawdown(portfolio_values: pd.Series) -> float:
-    """Calculate maximum drawdown as peak-to-trough decline.
+def compute_max_drawdown(portfolio_values: pd.Series) -> float:
+    """Compute maximum drawdown as peak-to-trough decline.
 
     Args:
         portfolio_values: Time series of portfolio values with DatetimeIndex.
@@ -75,11 +75,11 @@ def calculate_max_drawdown(portfolio_values: pd.Series) -> float:
     drawdown = (portfolio_values - cumulative_max) / cumulative_max * 100
     return drawdown.min()
 
-def calculate_sharpe_ratio(
+def compute_sharpe_ratio(
     portfolio_values: pd.Series, 
     risk_free_rate: float = 0.0
 ) -> float:
-    """Calculate annualized Sharpe ratio (risk-adjusted return).
+    """Compute annualized Sharpe ratio (risk-adjusted return).
 
     Args:
         portfolio_values: Time series of portfolio values with DatetimeIndex.
@@ -182,7 +182,7 @@ if holdings:
         portfolio_value = portfolio_value.dropna()
         
         if len(portfolio_value) > 0:
-            # Calculate metrics
+            # Compute metrics
             initial_value = portfolio_value.iloc[0]
             final_value = portfolio_value.iloc[-1]
             total_return = ((final_value - initial_value) / initial_value) * 100
@@ -198,14 +198,14 @@ if holdings:
             
             with col3:
                 if len(portfolio_value) > 1:
-                    cagr = calculate_cagr(portfolio_value)
+                    cagr = compute_cagr(portfolio_value)
                     st.metric("CAGR", f"{cagr:.2f}%")
                 else:
                     st.metric("CAGR", "N/A")
             
             with col4:
                 if len(portfolio_value) > 1:
-                    volatility = calculate_volatility(portfolio_value)
+                    volatility = compute_volatility(portfolio_value)
                     st.metric("Volatility (Ann.)", f"{volatility:.2f}%")
                 else:
                     st.metric("Volatility", "N/A")
@@ -218,14 +218,14 @@ if holdings:
             
             with col6:
                 if len(portfolio_value) > 1:
-                    max_dd = calculate_max_drawdown(portfolio_value)
+                    max_dd = compute_max_drawdown(portfolio_value)
                     st.metric("Max Drawdown", f"{max_dd:.2f}%")
                 else:
                     st.metric("Max Drawdown", "N/A")
             
             with col7:
                 if len(portfolio_value) > 1:
-                    sharpe = calculate_sharpe_ratio(portfolio_value)
+                    sharpe = compute_sharpe_ratio(portfolio_value)
                     st.metric("Sharpe Ratio", f"{sharpe:.2f}")
                 else:
                     st.metric("Sharpe Ratio", "N/A")
