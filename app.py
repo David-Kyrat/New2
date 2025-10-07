@@ -283,24 +283,37 @@ if holdings:
             # CAGR and Sharpe Ratio - only for 1 year+ data
             needs_yearly_data = selected_range != "1 Year"
             
+            # Initialize session state for yearly metrics
+            if 'yearly_cagr' not in st.session_state:
+                st.session_state.yearly_cagr = None
+            if 'yearly_sharpe' not in st.session_state:
+                st.session_state.yearly_sharpe = None
+            
             with col7:
                 if not needs_yearly_data and len(portfolio_value) > 1:
                     cagr = compute_cagr(portfolio_value)
                     st.metric("CAGR", f"{cagr:.2f}%")
+                elif st.session_state.yearly_cagr is not None:
+                    st.metric("CAGR", f"{st.session_state.yearly_cagr:.2f}%", 
+                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.")
                 else:
-                    st.metric("CAGR", "—")
+                    st.metric("CAGR", "—",
+                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.")
             
             with col8:
                 if not needs_yearly_data and len(portfolio_value) > 1:
                     sharpe = compute_sharpe_ratio(portfolio_value)
                     st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                elif st.session_state.yearly_sharpe is not None:
+                    st.metric("Sharpe Ratio", f"{st.session_state.yearly_sharpe:.2f}",
+                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.")
                 else:
-                    st.metric("Sharpe Ratio", "—")
+                    st.metric("Sharpe Ratio", "—",
+                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.")
             
             # Button to compute annualized metrics for short ranges
             if needs_yearly_data:
-                st.info("💡 **CAGR and Sharpe Ratio** require at least 1 year of data for meaningful results.")
-                if st.button("📊 Compute Annualized Metrics (Downloads 1 Year Data)", type="primary"):
+                if st.button("📊 Compute Annualized Metrics (Downloads 1 Year Data)", type="secondary"):
                     with st.spinner("Downloading 1 year of data..."):
                         year_start = datetime.now() - timedelta(days=365)
                         year_end = datetime.now()
@@ -308,6 +321,8 @@ if holdings:
                     
                     if yearly_error:
                         st.error(f"Failed to download yearly data: {yearly_error}")
+                        st.session_state.yearly_cagr = None
+                        st.session_state.yearly_sharpe = None
                     elif yearly_data is not None and not yearly_data.empty:
                         # Calculate portfolio value for 1 year
                         yearly_portfolio = pd.Series(0.0, index=yearly_data.index)
@@ -318,19 +333,17 @@ if holdings:
                         yearly_portfolio = yearly_portfolio.dropna()
                         
                         if len(yearly_portfolio) > 1:
-                            ann_cagr = compute_cagr(yearly_portfolio)
-                            ann_sharpe = compute_sharpe_ratio(yearly_portfolio)
-                            
-                            st.success("✅ Annualized metrics computed over 1 year:")
-                            metric_col1, metric_col2 = st.columns(2)
-                            with metric_col1:
-                                st.metric("CAGR (1 Year)", f"{ann_cagr:.2f}%")
-                            with metric_col2:
-                                st.metric("Sharpe Ratio (1 Year)", f"{ann_sharpe:.2f}")
+                            st.session_state.yearly_cagr = compute_cagr(yearly_portfolio)
+                            st.session_state.yearly_sharpe = compute_sharpe_ratio(yearly_portfolio)
+                            st.rerun()
                         else:
                             st.warning("Insufficient yearly data to compute metrics.")
+                            st.session_state.yearly_cagr = None
+                            st.session_state.yearly_sharpe = None
                     else:
                         st.error("Failed to download yearly data.")
+                        st.session_state.yearly_cagr = None
+                        st.session_state.yearly_sharpe = None
             
             # Chart
             st.subheader(f"Portfolio Value - {selected_range}")
