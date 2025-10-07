@@ -259,17 +259,13 @@ if holdings:
             
             with col3:
                 if len(portfolio_value) > 1:
-                    cagr = compute_cagr(portfolio_value)
-                    st.metric("CAGR", f"{cagr:.2f}%")
-                else:
-                    st.metric("CAGR", "N/A")
-            
-            with col4:
-                if len(portfolio_value) > 1:
                     volatility = compute_volatility(portfolio_value)
                     st.metric("Volatility (Ann.)", f"{volatility:.2f}%")
                 else:
                     st.metric("Volatility", "N/A")
+            
+            with col4:
+                st.metric("Holdings", len(holdings))
             
             # Additional metrics
             col5, col6, col7, col8 = st.columns(4)
@@ -284,15 +280,57 @@ if holdings:
                 else:
                     st.metric("Max Drawdown", "N/A")
             
+            # CAGR and Sharpe Ratio - only for 1 year+ data
+            needs_yearly_data = selected_range != "1 Year"
+            
             with col7:
-                if len(portfolio_value) > 1:
+                if not needs_yearly_data and len(portfolio_value) > 1:
+                    cagr = compute_cagr(portfolio_value)
+                    st.metric("CAGR", f"{cagr:.2f}%")
+                else:
+                    st.metric("CAGR", "—")
+            
+            with col8:
+                if not needs_yearly_data and len(portfolio_value) > 1:
                     sharpe = compute_sharpe_ratio(portfolio_value)
                     st.metric("Sharpe Ratio", f"{sharpe:.2f}")
                 else:
-                    st.metric("Sharpe Ratio", "N/A")
+                    st.metric("Sharpe Ratio", "—")
             
-            with col8:
-                st.metric("Holdings", len(holdings))
+            # Button to compute annualized metrics for short ranges
+            if needs_yearly_data:
+                st.info("💡 **CAGR and Sharpe Ratio** require at least 1 year of data for meaningful results.")
+                if st.button("📊 Compute Annualized Metrics (Downloads 1 Year Data)", type="primary"):
+                    with st.spinner("Downloading 1 year of data..."):
+                        year_start = datetime.now() - timedelta(days=365)
+                        year_end = datetime.now()
+                        yearly_data, yearly_error = download_data(tickers, year_start, year_end)
+                    
+                    if yearly_error:
+                        st.error(f"Failed to download yearly data: {yearly_error}")
+                    elif yearly_data is not None and not yearly_data.empty:
+                        # Calculate portfolio value for 1 year
+                        yearly_portfolio = pd.Series(0.0, index=yearly_data.index)
+                        for ticker, shares in holdings.items():
+                            if ticker in yearly_data.columns:
+                                yearly_portfolio += yearly_data[ticker] * shares
+                        
+                        yearly_portfolio = yearly_portfolio.dropna()
+                        
+                        if len(yearly_portfolio) > 1:
+                            ann_cagr = compute_cagr(yearly_portfolio)
+                            ann_sharpe = compute_sharpe_ratio(yearly_portfolio)
+                            
+                            st.success("✅ Annualized metrics computed over 1 year:")
+                            metric_col1, metric_col2 = st.columns(2)
+                            with metric_col1:
+                                st.metric("CAGR (1 Year)", f"{ann_cagr:.2f}%")
+                            with metric_col2:
+                                st.metric("Sharpe Ratio (1 Year)", f"{ann_sharpe:.2f}")
+                        else:
+                            st.warning("Insufficient yearly data to compute metrics.")
+                    else:
+                        st.error("Failed to download yearly data.")
             
             # Chart
             st.subheader(f"Portfolio Value - {selected_range}")
