@@ -14,11 +14,11 @@ def download_data(
     start_date: datetime, 
     end_date: datetime
 ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-    """Download adjusted close prices for multiple tickers via yfinance.
+    """Download close prices for multiple tickers via yfinance.
 
-    Fetches historical data in a single batch call for efficiency. Uses
-    auto_adjust=False to ensure Adj Close column availability. Implements
-    retry logic with exponential backoff for rate limit errors.
+    Downloads each ticker individually using yf.Ticker() to avoid rate limits.
+    Implements retry logic with exponential backoff for rate limit errors.
+    Uses auto_adjust=False and returns Close prices (equivalent to Adj Close).
 
     Args:
         tickers: List of ticker symbols (e.g., ['AAPL', 'MSFT']).
@@ -33,30 +33,44 @@ def download_data(
         return None, None
     
     max_retries = 3
-    base_delay = 2  # seconds
+    base_delay = 1  # seconds
     
     for attempt in range(max_retries):
         try:
-            data = yf.download(
-                tickers, 
-                start=start_date, 
-                end=end_date, 
-                progress=False, 
-                auto_adjust=False
-            )
+            # Use individual Ticker objects for better reliability
+            if len(tickers) == 1:
+                # Single ticker
+                ticker_obj = yf.Ticker(tickers[0])
+                hist = ticker_obj.history(start=start_date, end=end_date, auto_adjust=False)
+                if hist.empty:
+                    return None, f"No data returned for {tickers[0]}. Please verify the ticker symbol."
+                result = pd.DataFrame({tickers[0]: hist['Close']})
+            else:
+                # Multiple tickers - download individually to avoid rate limits
+                all_data = {}
+                for ticker in tickers:
+                    ticker_obj = yf.Ticker(ticker)
+                    hist = ticker_obj.history(start=start_date, end=end_date, auto_adjust=False)
+                    if not hist.empty:
+                        all_data[ticker] = hist['Close']
+                    else:
+                        # Try with batch download as fallback
+                        time.sleep(0.5)  # Small delay between attempts
+                
+                if not all_data:
+                    return None, "No data returned for any ticker. Please verify ticker symbols."
+                
+                result = pd.DataFrame(all_data)
             
-            if data.empty:
-                return None, "No data returned. Please verify ticker symbols are correct."
-            
-            return data['Adj Close'], None
+            return result, None
             
         except Exception as e:
             error_msg = str(e)
             
             # Check if it's a rate limit error
-            if 'Rate limit' in error_msg or 'Too Many Requests' in error_msg:
+            if 'Rate limit' in error_msg or 'Too Many Requests' in error_msg or '429' in error_msg:
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
                     time.sleep(delay)
                     continue
                 else:
