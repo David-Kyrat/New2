@@ -45,23 +45,39 @@ def download_data(
                 hist = ticker_obj.history(start=start_date, end=end_date, auto_adjust=False)
                 if hist.empty:
                     return None, f"No data returned for {tickers[0]}. Please verify the ticker symbol."
+                # Normalize to date-only index to handle timezones
+                hist.index = hist.index.tz_localize(None).normalize()
                 result = pd.DataFrame({tickers[0]: hist['Close']})
             else:
                 # Multiple tickers - download individually to avoid rate limits
                 all_data = {}
+                failed_tickers = []
+                ticker_info = []
+                
                 for ticker in tickers:
                     ticker_obj = yf.Ticker(ticker)
                     hist = ticker_obj.history(start=start_date, end=end_date, auto_adjust=False)
                     if not hist.empty:
+                        # Normalize to date-only index to handle timezone mismatches
+                        hist.index = hist.index.tz_localize(None).normalize()
                         all_data[ticker] = hist['Close']
+                        ticker_info.append(f"✓ {ticker}: {len(hist)} days")
                     else:
-                        # Try with batch download as fallback
+                        failed_tickers.append(ticker)
+                        ticker_info.append(f"✗ {ticker}: No data")
                         time.sleep(0.5)  # Small delay between attempts
                 
                 if not all_data:
-                    return None, "No data returned for any ticker. Please verify ticker symbols."
+                    error_details = "\n".join(ticker_info)
+                    return None, f"No data returned for any ticker.\n\nTicker Status:\n{error_details}\n\nPlease verify ticker symbols are correct."
                 
+                # Combine data and forward-fill to handle different trading days
                 result = pd.DataFrame(all_data)
+                
+                # Log which tickers succeeded/failed
+                if failed_tickers:
+                    failed_str = ", ".join(failed_tickers)
+                    return result, f"Warning: No data for {failed_str}. Proceeding with available tickers."
             
             return result, None
             
@@ -226,8 +242,9 @@ if holdings:
     with st.spinner(f"Downloading data for {', '.join(tickers)}..."):
         price_data, error = download_data(tickers, start_date, end_date)
     
-    # Handle download errors
-    if error:
+    # Handle download errors and warnings
+    if error and price_data is None:
+        # Critical error - no data at all
         st.error(error)
         if 'rate limit' in error.lower():
             st.info("💡 **Tips to avoid rate limits:**\n"
@@ -236,6 +253,9 @@ if holdings:
                    "- Use a shorter time range\n"
                    "- The app caches data for 1 hour, so successful downloads won't need to re-fetch")
     elif price_data is not None and not price_data.empty:
+        # Show warnings if some tickers failed but we have data
+        if error and 'Warning' in error:
+            st.warning(error)
         # Calculate portfolio value
         portfolio_value = pd.Series(0.0, index=price_data.index)
         
@@ -253,12 +273,14 @@ if holdings:
             initial_value = portfolio_value.iloc[0]
             final_value = portfolio_value.iloc[-1]
             total_return = ((final_value - initial_value) / initial_value) * 100
+            dollar_change = final_value - initial_value
             
             # Display metrics
-            portfolio_value_col, total_return_col, volatility_col, holdings_col = st.columns(4)
+            portfolio_value_col, total_return_col, volatility_col = st.columns(3)
             
             with portfolio_value_col:
-                st.metric("Portfolio Value", f"${final_value:,.2f}", border=True)
+                st.metric("Portfolio Value", f"${final_value:,.2f}", 
+                         delta=f"{total_return:+.2f}%", border=True)
             
             with total_return_col:
                 st.metric("Total Return", f"{total_return:+.2f}%", border=True)
@@ -270,14 +292,12 @@ if holdings:
                 else:
                     st.metric("Volatility", "N/A", border=True)
             
-            with holdings_col:
-                st.metric("Holdings", len(holdings), border=True)
-            
             # Additional metrics
             initial_value_col, max_dd_col, cagr_col, sharpe_col = st.columns(4)
             
             with initial_value_col:
-                st.metric("Initial Value", f"${initial_value:,.2f}", border=True)
+                st.metric("Initial Value", f"${initial_value:,.2f}", 
+                         delta=f"${dollar_change:+,.2f}", border=True)
             
             with max_dd_col:
                 if len(portfolio_value) > 1:
