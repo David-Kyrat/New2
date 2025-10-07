@@ -2,8 +2,9 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import time
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 st.set_page_config(page_title="Portfolio Performance", layout="wide")
 
@@ -12,11 +13,12 @@ def download_data(
     tickers: List[str], 
     start_date: datetime, 
     end_date: datetime
-) -> Optional[pd.DataFrame]:
+) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """Download adjusted close prices for multiple tickers via yfinance.
 
     Fetches historical data in a single batch call for efficiency. Uses
-    auto_adjust=False to ensure Adj Close column availability.
+    auto_adjust=False to ensure Adj Close column availability. Implements
+    retry logic with exponential backoff for rate limit errors.
 
     Args:
         tickers: List of ticker symbols (e.g., ['AAPL', 'MSFT']).
@@ -24,12 +26,49 @@ def download_data(
         end_date: End date for historical data.
 
     Returns:
-        DataFrame with tickers as columns and dates as index, or None if empty.
+        Tuple of (DataFrame with tickers as columns and dates as index or None, 
+                 error message string or None).
     """
     if not tickers:
-        return None
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
-    return data['Adj Close']
+        return None, None
+    
+    max_retries = 3
+    base_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            data = yf.download(
+                tickers, 
+                start=start_date, 
+                end=end_date, 
+                progress=False, 
+                auto_adjust=False,
+                show_errors=False
+            )
+            
+            if data.empty:
+                return None, "No data returned. Please verify ticker symbols are correct."
+            
+            return data['Adj Close'], None
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Check if it's a rate limit error
+            if 'Rate limit' in error_msg or 'Too Many Requests' in error_msg:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    time.sleep(delay)
+                    continue
+                else:
+                    return None, (
+                        "Yahoo Finance rate limit reached. Please wait a minute and try again. "
+                        "Tip: Try using fewer tickers or a shorter time range."
+                    )
+            else:
+                return None, f"Error downloading data: {error_msg}"
+    
+    return None, "Failed to download data after multiple retries."
 
 def compute_cagr(portfolio_values: pd.Series) -> float:
     """Compute Compound Annual Growth Rate (CAGR).
@@ -166,9 +205,18 @@ if holdings:
     tickers = list(holdings.keys())
     
     with st.spinner(f"Downloading data for {', '.join(tickers)}..."):
-        price_data = download_data(tickers, start_date, end_date)
+        price_data, error = download_data(tickers, start_date, end_date)
     
-    if price_data is not None and not price_data.empty:
+    # Handle download errors
+    if error:
+        st.error(error)
+        if 'rate limit' in error.lower():
+            st.info("💡 **Tips to avoid rate limits:**\n"
+                   "- Wait 30-60 seconds before retrying\n"
+                   "- Try with fewer tickers\n"
+                   "- Use a shorter time range\n"
+                   "- The app caches data for 1 hour, so successful downloads won't need to re-fetch")
+    elif price_data is not None and not price_data.empty:
         # Calculate portfolio value
         portfolio_value = pd.Series(0.0, index=price_data.index)
         
@@ -266,8 +314,6 @@ if holdings:
                     )
         else:
             st.error("No valid data available for the selected time range.")
-    else:
-        st.error("Failed to download data. Please check ticker symbols.")
 else:
     st.info("👈 Enter your portfolio holdings in the sidebar to get started.")
     st.markdown("""
