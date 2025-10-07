@@ -3,10 +3,22 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import time
+import altair as alt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
 st.set_page_config(page_title="Portfolio Performance", layout="wide")
+
+# Custom CSS for metric borders
+st.markdown("""
+<style>
+    [data-testid="stMetric"] {
+        border: 1px solid rgba(49, 51, 63, 0.2);
+        padding: 10px;
+        border-radius: 5px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 @st.cache_data(ttl=3600)
 def download_data(
@@ -196,13 +208,18 @@ range_options = {
     "1 Month": 30,
     "3 Months": 90,
     "6 Months": 180,
-    "1 Year": 365
+    "1 Year": 365,
+    "2 Years": 730,
+    "3 Years": 1095,
+    "4 Years": 1460,
+    "5 Years": 1825,
+    "10 Years": 3650
 }
 
 selected_range = st.sidebar.selectbox(
     "Time Range",
     options=list(range_options.keys()),
-    index=3  # Default to 6 Months
+    index=4  # Default to 1 Year
 )
 
 # Parse portfolio
@@ -249,31 +266,31 @@ if holdings:
             total_return = ((final_value - initial_value) / initial_value) * 100
             
             # Display metrics
-            col1, col2, col3, col4 = st.columns(4)
+            portfolio_value_col, total_return_col, volatility_col, holdings_col = st.columns(4)
             
-            with col1:
+            with portfolio_value_col:
                 st.metric("Portfolio Value", f"${final_value:,.2f}")
             
-            with col2:
+            with total_return_col:
                 st.metric("Total Return", f"{total_return:+.2f}%")
             
-            with col3:
+            with volatility_col:
                 if len(portfolio_value) > 1:
                     volatility = compute_volatility(portfolio_value)
                     st.metric("Volatility (Ann.)", f"{volatility:.2f}%")
                 else:
                     st.metric("Volatility", "N/A")
             
-            with col4:
+            with holdings_col:
                 st.metric("Holdings", len(holdings))
             
             # Additional metrics
-            col5, col6, col7, col8 = st.columns(4)
+            initial_value_col, max_dd_col, cagr_col, sharpe_col = st.columns(4)
             
-            with col5:
+            with initial_value_col:
                 st.metric("Initial Value", f"${initial_value:,.2f}")
             
-            with col6:
+            with max_dd_col:
                 if len(portfolio_value) > 1:
                     max_dd = compute_max_drawdown(portfolio_value)
                     st.metric("Max Drawdown", f"{max_dd:.2f}%")
@@ -281,7 +298,7 @@ if holdings:
                     st.metric("Max Drawdown", "N/A")
             
             # CAGR and Sharpe Ratio - only for 1 year+ data
-            needs_yearly_data = selected_range != "1 Year"
+            needs_yearly_data = range_options[selected_range] < range_options["1 Year"]
             
             # Initialize session state for yearly metrics
             if 'yearly_cagr' not in st.session_state:
@@ -289,7 +306,7 @@ if holdings:
             if 'yearly_sharpe' not in st.session_state:
                 st.session_state.yearly_sharpe = None
             
-            with col7:
+            with cagr_col:
                 if not needs_yearly_data and len(portfolio_value) > 1:
                     cagr = compute_cagr(portfolio_value)
                     st.metric("CAGR", f"{cagr:.2f}%")
@@ -300,7 +317,7 @@ if holdings:
                     st.metric("CAGR", "—",
                              help="Requires at least 1 year of data for meaningful results. Click button below to compute.")
             
-            with col8:
+            with sharpe_col:
                 if not needs_yearly_data and len(portfolio_value) > 1:
                     sharpe = compute_sharpe_ratio(portfolio_value)
                     st.metric("Sharpe Ratio", f"{sharpe:.2f}")
@@ -348,11 +365,42 @@ if holdings:
             # Chart
             st.subheader(f"Portfolio Value - {selected_range}")
             
+            # Prepare data for Altair chart
             chart_data = pd.DataFrame({
-                'Portfolio Value': portfolio_value
+                'Date': portfolio_value.index,
+                'Portfolio Value': portfolio_value.values
             })
             
-            st.line_chart(chart_data, height=500)
+            # Create Altair chart with custom y-axis and baseline
+            base_chart = alt.Chart(chart_data).encode(
+                x=alt.X('Date:T', title='Date'),
+                y=alt.Y('Portfolio Value:Q', 
+                       title='Portfolio Value ($)',
+                       scale=alt.Scale(zero=False))
+            )
+            
+            # Line for portfolio value
+            line = base_chart.mark_line(color='#1f77b4', size=2).encode(
+                tooltip=[
+                    alt.Tooltip('Date:T', format='%Y-%m-%d'),
+                    alt.Tooltip('Portfolio Value:Q', format='$,.2f')
+                ]
+            )
+            
+            # Horizontal line for initial investment
+            initial_line = alt.Chart(pd.DataFrame({
+                'y': [initial_value]
+            })).mark_rule(color='gray', strokeDash=[5, 5], opacity=0.6).encode(
+                y='y:Q',
+                tooltip=alt.value(f'Initial Investment: ${initial_value:,.2f}')
+            )
+            
+            # Combine charts
+            chart = (line + initial_line).properties(
+                height=500
+            ).interactive()
+            
+            st.altair_chart(chart, use_container_width=True)
             
             # Show holdings breakdown
             with st.expander("📊 Holdings Breakdown"):
