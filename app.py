@@ -42,8 +42,7 @@ def download_data(
                 start=start_date, 
                 end=end_date, 
                 progress=False, 
-                auto_adjust=False,
-                show_errors=False
+                auto_adjust=False
             )
             
             if data.empty:
