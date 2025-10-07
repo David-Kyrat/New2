@@ -9,17 +9,6 @@ from typing import Optional, Dict, List, Tuple
 
 st.set_page_config(page_title="Portfolio Performance", layout="wide")
 
-# Custom CSS for metric borders
-st.markdown("""
-<style>
-    [data-testid="stMetric"] {
-        border: 1px solid rgba(49, 51, 63, 0.2);
-        padding: 10px;
-        border-radius: 5px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 @st.cache_data(ttl=3600)
 def download_data(
     tickers: List[str], 
@@ -219,7 +208,7 @@ range_options = {
 selected_range = st.sidebar.selectbox(
     "Time Range",
     options=list(range_options.keys()),
-    index=4  # Default to 1 Year
+    index=3  # Default to 6 Months
 )
 
 # Parse portfolio
@@ -269,33 +258,33 @@ if holdings:
             portfolio_value_col, total_return_col, volatility_col, holdings_col = st.columns(4)
             
             with portfolio_value_col:
-                st.metric("Portfolio Value", f"${final_value:,.2f}")
+                st.metric("Portfolio Value", f"${final_value:,.2f}", border=True)
             
             with total_return_col:
-                st.metric("Total Return", f"{total_return:+.2f}%")
+                st.metric("Total Return", f"{total_return:+.2f}%", border=True)
             
             with volatility_col:
                 if len(portfolio_value) > 1:
                     volatility = compute_volatility(portfolio_value)
-                    st.metric("Volatility (Ann.)", f"{volatility:.2f}%")
+                    st.metric("Volatility (Ann.)", f"{volatility:.2f}%", border=True)
                 else:
-                    st.metric("Volatility", "N/A")
+                    st.metric("Volatility", "N/A", border=True)
             
             with holdings_col:
-                st.metric("Holdings", len(holdings))
+                st.metric("Holdings", len(holdings), border=True)
             
             # Additional metrics
             initial_value_col, max_dd_col, cagr_col, sharpe_col = st.columns(4)
             
             with initial_value_col:
-                st.metric("Initial Value", f"${initial_value:,.2f}")
+                st.metric("Initial Value", f"${initial_value:,.2f}", border=True)
             
             with max_dd_col:
                 if len(portfolio_value) > 1:
                     max_dd = compute_max_drawdown(portfolio_value)
-                    st.metric("Max Drawdown", f"{max_dd:.2f}%")
+                    st.metric("Max Drawdown", f"{max_dd:.2f}%", border=True)
                 else:
-                    st.metric("Max Drawdown", "N/A")
+                    st.metric("Max Drawdown", "N/A", border=True)
             
             # CAGR and Sharpe Ratio - only for 1 year+ data
             needs_yearly_data = range_options[selected_range] < range_options["1 Year"]
@@ -309,24 +298,28 @@ if holdings:
             with cagr_col:
                 if not needs_yearly_data and len(portfolio_value) > 1:
                     cagr = compute_cagr(portfolio_value)
-                    st.metric("CAGR", f"{cagr:.2f}%")
+                    st.metric("CAGR", f"{cagr:.2f}%", border=True)
                 elif st.session_state.yearly_cagr is not None:
                     st.metric("CAGR", f"{st.session_state.yearly_cagr:.2f}%", 
-                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.")
+                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.",
+                             border=True)
                 else:
                     st.metric("CAGR", "—",
-                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.")
+                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.",
+                             border=True)
             
             with sharpe_col:
                 if not needs_yearly_data and len(portfolio_value) > 1:
                     sharpe = compute_sharpe_ratio(portfolio_value)
-                    st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                    st.metric("Sharpe Ratio", f"{sharpe:.2f}", border=True)
                 elif st.session_state.yearly_sharpe is not None:
                     st.metric("Sharpe Ratio", f"{st.session_state.yearly_sharpe:.2f}",
-                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.")
+                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.",
+                             border=True)
                 else:
                     st.metric("Sharpe Ratio", "—",
-                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.")
+                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.",
+                             border=True)
             
             # Button to compute annualized metrics for short ranges
             if needs_yearly_data:
