@@ -2,8 +2,10 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import time
+import altair as alt
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 st.set_page_config(page_title="Portfolio Performance", layout="wide")
 
@@ -12,11 +14,12 @@ def download_data(
     tickers: List[str], 
     start_date: datetime, 
     end_date: datetime
-) -> Optional[pd.DataFrame]:
-    """Download adjusted close prices for multiple tickers via yfinance.
+) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """Download close prices for multiple tickers via yfinance.
 
-    Fetches historical data in a single batch call for efficiency. Uses
-    auto_adjust=False to ensure Adj Close column availability.
+    Downloads each ticker individually using yf.Ticker() to avoid rate limits.
+    Implements retry logic with exponential backoff for rate limit errors.
+    Uses auto_adjust=False and returns Close prices (equivalent to Adj Close).
 
     Args:
         tickers: List of ticker symbols (e.g., ['AAPL', 'MSFT']).
@@ -24,12 +27,62 @@ def download_data(
         end_date: End date for historical data.
 
     Returns:
-        DataFrame with tickers as columns and dates as index, or None if empty.
+        Tuple of (DataFrame with tickers as columns and dates as index or None, 
+                 error message string or None).
     """
     if not tickers:
-        return None
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=False)
-    return data['Adj Close']
+        return None, None
+    
+    max_retries = 3
+    base_delay = 1  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Use individual Ticker objects for better reliability
+            if len(tickers) == 1:
+                # Single ticker
+                ticker_obj = yf.Ticker(tickers[0])
+                hist = ticker_obj.history(start=start_date, end=end_date, auto_adjust=False)
+                if hist.empty:
+                    return None, f"No data returned for {tickers[0]}. Please verify the ticker symbol."
+                result = pd.DataFrame({tickers[0]: hist['Close']})
+            else:
+                # Multiple tickers - download individually to avoid rate limits
+                all_data = {}
+                for ticker in tickers:
+                    ticker_obj = yf.Ticker(ticker)
+                    hist = ticker_obj.history(start=start_date, end=end_date, auto_adjust=False)
+                    if not hist.empty:
+                        all_data[ticker] = hist['Close']
+                    else:
+                        # Try with batch download as fallback
+                        time.sleep(0.5)  # Small delay between attempts
+                
+                if not all_data:
+                    return None, "No data returned for any ticker. Please verify ticker symbols."
+                
+                result = pd.DataFrame(all_data)
+            
+            return result, None
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Check if it's a rate limit error
+            if 'Rate limit' in error_msg or 'Too Many Requests' in error_msg or '429' in error_msg:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                    time.sleep(delay)
+                    continue
+                else:
+                    return None, (
+                        "Yahoo Finance rate limit reached. Please wait a minute and try again. "
+                        "Tip: Try using fewer tickers or a shorter time range."
+                    )
+            else:
+                return None, f"Error downloading data: {error_msg}"
+    
+    return None, "Failed to download data after multiple retries."
 
 def compute_cagr(portfolio_values: pd.Series) -> float:
     """Compute Compound Annual Growth Rate (CAGR).
@@ -144,7 +197,12 @@ range_options = {
     "1 Month": 30,
     "3 Months": 90,
     "6 Months": 180,
-    "1 Year": 365
+    "1 Year": 365,
+    "2 Years": 730,
+    "3 Years": 1095,
+    "4 Years": 1460,
+    "5 Years": 1825,
+    "10 Years": 3650
 }
 
 selected_range = st.sidebar.selectbox(
@@ -166,9 +224,18 @@ if holdings:
     tickers = list(holdings.keys())
     
     with st.spinner(f"Downloading data for {', '.join(tickers)}..."):
-        price_data = download_data(tickers, start_date, end_date)
+        price_data, error = download_data(tickers, start_date, end_date)
     
-    if price_data is not None and not price_data.empty:
+    # Handle download errors
+    if error:
+        st.error(error)
+        if 'rate limit' in error.lower():
+            st.info("💡 **Tips to avoid rate limits:**\n"
+                   "- Wait 30-60 seconds before retrying\n"
+                   "- Try with fewer tickers\n"
+                   "- Use a shorter time range\n"
+                   "- The app caches data for 1 hour, so successful downloads won't need to re-fetch")
+    elif price_data is not None and not price_data.empty:
         # Calculate portfolio value
         portfolio_value = pd.Series(0.0, index=price_data.index)
         
@@ -188,59 +255,145 @@ if holdings:
             total_return = ((final_value - initial_value) / initial_value) * 100
             
             # Display metrics
-            col1, col2, col3, col4 = st.columns(4)
+            portfolio_value_col, total_return_col, volatility_col, holdings_col = st.columns(4)
             
-            with col1:
-                st.metric("Portfolio Value", f"${final_value:,.2f}")
+            with portfolio_value_col:
+                st.metric("Portfolio Value", f"${final_value:,.2f}", border=True)
             
-            with col2:
-                st.metric("Total Return", f"{total_return:+.2f}%")
+            with total_return_col:
+                st.metric("Total Return", f"{total_return:+.2f}%", border=True)
             
-            with col3:
-                if len(portfolio_value) > 1:
-                    cagr = compute_cagr(portfolio_value)
-                    st.metric("CAGR", f"{cagr:.2f}%")
-                else:
-                    st.metric("CAGR", "N/A")
-            
-            with col4:
+            with volatility_col:
                 if len(portfolio_value) > 1:
                     volatility = compute_volatility(portfolio_value)
-                    st.metric("Volatility (Ann.)", f"{volatility:.2f}%")
+                    st.metric("Volatility (Ann.)", f"{volatility:.2f}%", border=True)
                 else:
-                    st.metric("Volatility", "N/A")
+                    st.metric("Volatility", "N/A", border=True)
+            
+            with holdings_col:
+                st.metric("Holdings", len(holdings), border=True)
             
             # Additional metrics
-            col5, col6, col7, col8 = st.columns(4)
+            initial_value_col, max_dd_col, cagr_col, sharpe_col = st.columns(4)
             
-            with col5:
-                st.metric("Initial Value", f"${initial_value:,.2f}")
+            with initial_value_col:
+                st.metric("Initial Value", f"${initial_value:,.2f}", border=True)
             
-            with col6:
+            with max_dd_col:
                 if len(portfolio_value) > 1:
                     max_dd = compute_max_drawdown(portfolio_value)
-                    st.metric("Max Drawdown", f"{max_dd:.2f}%")
+                    st.metric("Max Drawdown", f"{max_dd:.2f}%", border=True)
                 else:
-                    st.metric("Max Drawdown", "N/A")
+                    st.metric("Max Drawdown", "N/A", border=True)
             
-            with col7:
-                if len(portfolio_value) > 1:
+            # CAGR and Sharpe Ratio - only for 1 year+ data
+            needs_yearly_data = range_options[selected_range] < range_options["1 Year"]
+            
+            # Initialize session state for yearly metrics
+            if 'yearly_cagr' not in st.session_state:
+                st.session_state.yearly_cagr = None
+            if 'yearly_sharpe' not in st.session_state:
+                st.session_state.yearly_sharpe = None
+            
+            with cagr_col:
+                if not needs_yearly_data and len(portfolio_value) > 1:
+                    cagr = compute_cagr(portfolio_value)
+                    st.metric("CAGR", f"{cagr:.2f}%", border=True)
+                elif st.session_state.yearly_cagr is not None:
+                    st.metric("CAGR", f"{st.session_state.yearly_cagr:.2f}%", 
+                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.",
+                             border=True)
+                else:
+                    st.metric("CAGR", "—",
+                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.",
+                             border=True)
+            
+            with sharpe_col:
+                if not needs_yearly_data and len(portfolio_value) > 1:
                     sharpe = compute_sharpe_ratio(portfolio_value)
-                    st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                    st.metric("Sharpe Ratio", f"{sharpe:.2f}", border=True)
+                elif st.session_state.yearly_sharpe is not None:
+                    st.metric("Sharpe Ratio", f"{st.session_state.yearly_sharpe:.2f}",
+                             help="Requires at least 1 year of data for meaningful results. Computed over 1 year.",
+                             border=True)
                 else:
-                    st.metric("Sharpe Ratio", "N/A")
+                    st.metric("Sharpe Ratio", "—",
+                             help="Requires at least 1 year of data for meaningful results. Click button below to compute.",
+                             border=True)
             
-            with col8:
-                st.metric("Holdings", len(holdings))
+            # Button to compute annualized metrics for short ranges
+            if needs_yearly_data:
+                if st.button("📊 Compute Annualized Metrics (Downloads 1 Year Data)", type="secondary"):
+                    with st.spinner("Downloading 1 year of data..."):
+                        year_start = datetime.now() - timedelta(days=365)
+                        year_end = datetime.now()
+                        yearly_data, yearly_error = download_data(tickers, year_start, year_end)
+                    
+                    if yearly_error:
+                        st.error(f"Failed to download yearly data: {yearly_error}")
+                        st.session_state.yearly_cagr = None
+                        st.session_state.yearly_sharpe = None
+                    elif yearly_data is not None and not yearly_data.empty:
+                        # Calculate portfolio value for 1 year
+                        yearly_portfolio = pd.Series(0.0, index=yearly_data.index)
+                        for ticker, shares in holdings.items():
+                            if ticker in yearly_data.columns:
+                                yearly_portfolio += yearly_data[ticker] * shares
+                        
+                        yearly_portfolio = yearly_portfolio.dropna()
+                        
+                        if len(yearly_portfolio) > 1:
+                            st.session_state.yearly_cagr = compute_cagr(yearly_portfolio)
+                            st.session_state.yearly_sharpe = compute_sharpe_ratio(yearly_portfolio)
+                            st.rerun()
+                        else:
+                            st.warning("Insufficient yearly data to compute metrics.")
+                            st.session_state.yearly_cagr = None
+                            st.session_state.yearly_sharpe = None
+                    else:
+                        st.error("Failed to download yearly data.")
+                        st.session_state.yearly_cagr = None
+                        st.session_state.yearly_sharpe = None
             
             # Chart
             st.subheader(f"Portfolio Value - {selected_range}")
             
+            # Prepare data for Altair chart
             chart_data = pd.DataFrame({
-                'Portfolio Value': portfolio_value
+                'Date': portfolio_value.index,
+                'Portfolio Value': portfolio_value.values
             })
             
-            st.line_chart(chart_data, height=500)
+            # Create Altair chart with custom y-axis and baseline
+            base_chart = alt.Chart(chart_data).encode(
+                x=alt.X('Date:T', title='Date'),
+                y=alt.Y('Portfolio Value:Q', 
+                       title='Portfolio Value ($)',
+                       scale=alt.Scale(zero=False))
+            )
+            
+            # Line for portfolio value
+            line = base_chart.mark_line(color='#1f77b4', size=2).encode(
+                tooltip=[
+                    alt.Tooltip('Date:T', format='%Y-%m-%d'),
+                    alt.Tooltip('Portfolio Value:Q', format='$,.2f')
+                ]
+            )
+            
+            # Horizontal line for initial investment
+            initial_line = alt.Chart(pd.DataFrame({
+                'y': [initial_value]
+            })).mark_rule(color='gray', strokeDash=[5, 5], opacity=0.6).encode(
+                y='y:Q',
+                tooltip=alt.value(f'Initial Investment: ${initial_value:,.2f}')
+            )
+            
+            # Combine charts
+            chart = (line + initial_line).properties(
+                height=500
+            ).interactive()
+            
+            st.altair_chart(chart, use_container_width=True)
             
             # Show holdings breakdown
             with st.expander("📊 Holdings Breakdown"):
@@ -266,8 +419,6 @@ if holdings:
                     )
         else:
             st.error("No valid data available for the selected time range.")
-    else:
-        st.error("Failed to download data. Please check ticker symbols.")
 else:
     st.info("👈 Enter your portfolio holdings in the sidebar to get started.")
     st.markdown("""
