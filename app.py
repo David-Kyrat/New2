@@ -269,6 +269,22 @@ if holdings:
         portfolio_value = portfolio_value.dropna()
         
         if len(portfolio_value) > 0:
+            # Check if data range matches requested range
+            actual_start = portfolio_value.index[0]
+            actual_end = portfolio_value.index[-1]
+            actual_days = (actual_end - actual_start).days
+            requested_days = days
+            
+            # Show warning if data is significantly less than requested (allow 10% tolerance for weekends/holidays)
+            if actual_days < requested_days * 0.7:  # Less than 70% of requested range
+                days_short = requested_days - actual_days
+                st.warning(
+                    f"⚠️ **Limited Data Available**\n\n"
+                    f"Requested: {selected_range} ({requested_days} days)\n\n"
+                    f"Available: {actual_days} days (from {actual_start.strftime('%Y-%m-%d')} to {actual_end.strftime('%Y-%m-%d')})\n\n"
+                    f"Data is {days_short} days shorter than requested. Some tickers may have limited historical data."
+                )
+            
             # Compute metrics
             initial_value = portfolio_value.iloc[0]
             final_value = portfolio_value.iloc[-1]
