@@ -278,12 +278,40 @@ if holdings:
             # Show warning if data is significantly less than requested (allow 10% tolerance for weekends/holidays)
             if actual_days < requested_days * 0.7:  # Less than 70% of requested range
                 days_short = requested_days - actual_days
-                st.warning(
+                
+                # Identify which tickers have limited data
+                ticker_ranges = []
+                for ticker in price_data.columns:
+                    ticker_data = price_data[ticker].dropna()
+                    if len(ticker_data) > 0:
+                        ticker_start = ticker_data.index[0]
+                        ticker_end = ticker_data.index[-1]
+                        ticker_days = (ticker_end - ticker_start).days
+                        ticker_ranges.append({
+                            'ticker': ticker,
+                            'start': ticker_start,
+                            'end': ticker_end,
+                            'days': ticker_days,
+                            'percentage': (ticker_days / requested_days) * 100
+                        })
+                
+                # Sort by days available (ascending) to show most limited first
+                ticker_ranges.sort(key=lambda x: x['days'])
+                
+                # Build warning message
+                warning_msg = (
                     f"⚠️ **Limited Data Available**\n\n"
                     f"Requested: {selected_range} ({requested_days} days)\n\n"
-                    f"Available: {actual_days} days (from {actual_start.strftime('%Y-%m-%d')} to {actual_end.strftime('%Y-%m-%d')})\n\n"
-                    f"Data is {days_short} days shorter than requested. Some tickers may have limited historical data."
+                    f"Portfolio data: {actual_days} days (from {actual_start.strftime('%Y-%m-%d')} to {actual_end.strftime('%Y-%m-%d')})\n\n"
+                    f"**Ticker Data Ranges:**\n"
                 )
+                
+                for tr in ticker_ranges:
+                    warning_msg += f"- **{tr['ticker']}**: {tr['days']} days ({tr['percentage']:.0f}%) — {tr['start'].strftime('%Y-%m-%d')} to {tr['end'].strftime('%Y-%m-%d')}\n"
+                
+                warning_msg += f"\n💡 Some tickers have limited historical data availability."
+                
+                st.warning(warning_msg)
             
             # Compute metrics
             initial_value = portfolio_value.iloc[0]
