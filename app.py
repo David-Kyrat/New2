@@ -298,18 +298,23 @@ if holdings:
                 # Sort by days available (ascending) to show most limited first
                 ticker_ranges.sort(key=lambda x: x['days'])
                 
+                # Filter to show only tickers with limited data (less than 95% of requested)
+                limited_tickers = [tr for tr in ticker_ranges if tr['percentage'] < 95]
+                
                 # Build warning message
                 warning_msg = (
                     f"⚠️ **Limited Data Available**\n\n"
                     f"Requested: {selected_range} ({requested_days} days)\n\n"
                     f"Portfolio data: {actual_days} days (from {actual_start.strftime('%Y-%m-%d')} to {actual_end.strftime('%Y-%m-%d')})\n\n"
-                    f"**Ticker Data Ranges:**\n"
                 )
                 
-                for tr in ticker_ranges:
-                    warning_msg += f"- **{tr['ticker']}**: {tr['days']} days ({tr['percentage']:.0f}%) — {tr['start'].strftime('%Y-%m-%d')} to {tr['end'].strftime('%Y-%m-%d')}\n"
-                
-                warning_msg += f"\n💡 Some tickers have limited historical data availability."
+                if limited_tickers:
+                    warning_msg += f"**Tickers with Limited Data:**\n"
+                    for tr in limited_tickers:
+                        warning_msg += f"- **{tr['ticker']}**: {tr['days']} days ({tr['percentage']:.0f}%) — {tr['start'].strftime('%Y-%m-%d')} to {tr['end'].strftime('%Y-%m-%d')}\n"
+                    warning_msg += f"\n💡 The above ticker(s) have limited historical data availability."
+                else:
+                    warning_msg += f"💡 Some tickers have limited historical data availability."
                 
                 st.warning(warning_msg)
             
@@ -420,7 +425,7 @@ if holdings:
                         st.session_state.yearly_sharpe = None
             
             # Chart
-            st.subheader(f"Portfolio Value - {selected_range}")
+            st.subheader(f"Portfolio Value - {selected_range}: {actual_start.strftime('%Y-%m-%d')} to {actual_end.strftime('%Y-%m-%d')}")
             
             # Prepare data for Altair chart
             chart_data = pd.DataFrame({
