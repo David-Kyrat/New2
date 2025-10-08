@@ -275,8 +275,8 @@ if holdings:
             actual_days = (actual_end - actual_start).days
             requested_days = days
             
-            # Show warning if data is significantly less than requested (allow 10% tolerance for weekends/holidays)
-            if actual_days < requested_days * 0.7:  # Less than 70% of requested range
+            # Show warning if data is less than 95% of requested range
+            if actual_days < requested_days * 0.95:  # Less than 95% of requested range
                 days_short = requested_days - actual_days
                 
                 # Identify which tickers have limited data
