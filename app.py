@@ -7,9 +7,19 @@ import altair as alt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
+# Constants
+DATA_CACHE_TTL = 3600  # Cache data for 1 hour (seconds)
+RATE_LIMIT_MAX_RETRIES = 3  # Number of retries for rate limit errors
+RATE_LIMIT_BASE_DELAY = 1  # Base delay for exponential backoff (seconds)
+TICKER_DOWNLOAD_DELAY = 0.5  # Delay between individual ticker downloads (seconds)
+
+# Data completeness thresholds
+DATA_COMPLETENESS_THRESHOLD = 0.95  # Warn if data < 95% of requested range
+TICKER_DISPLAY_THRESHOLD = 0.95  # Only show tickers with < 95% data in warnings
+
 st.set_page_config(page_title="Portfolio Performance", layout="wide")
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=DATA_CACHE_TTL)
 def download_data(
     tickers: List[str], 
     start_date: datetime, 
@@ -33,8 +43,8 @@ def download_data(
     if not tickers:
         return None, None
     
-    max_retries = 3
-    base_delay = 1  # seconds
+    max_retries = RATE_LIMIT_MAX_RETRIES
+    base_delay = RATE_LIMIT_BASE_DELAY
     
     for attempt in range(max_retries):
         try:
@@ -65,7 +75,7 @@ def download_data(
                     else:
                         failed_tickers.append(ticker)
                         ticker_info.append(f"✗ {ticker}: No data")
-                        time.sleep(0.5)  # Small delay between attempts
+                        time.sleep(TICKER_DOWNLOAD_DELAY)  # Small delay between attempts
                 
                 if not all_data:
                     error_details = "\n".join(ticker_info)
@@ -218,6 +228,8 @@ range_options = {
     "3 Years": 1095,
     "4 Years": 1460,
     "5 Years": 1825,
+    "7 Years": 2555,
+    "8 Years": 2920,
     "10 Years": 3650
 }
 
@@ -275,8 +287,8 @@ if holdings:
             actual_days = (actual_end - actual_start).days
             requested_days = days
             
-            # Show warning if data is less than 95% of requested range
-            if actual_days < requested_days * 0.95:  # Less than 95% of requested range
+            # Show warning if data is less than threshold
+            if actual_days < requested_days * DATA_COMPLETENESS_THRESHOLD:
                 days_short = requested_days - actual_days
                 
                 # Identify which tickers have limited data
@@ -298,8 +310,8 @@ if holdings:
                 # Sort by days available (ascending) to show most limited first
                 ticker_ranges.sort(key=lambda x: x['days'])
                 
-                # Filter to show only tickers with limited data (less than 95% of requested)
-                limited_tickers = [tr for tr in ticker_ranges if tr['percentage'] < 95]
+                # Filter to show only tickers with limited data
+                limited_tickers = [tr for tr in ticker_ranges if tr['percentage'] < TICKER_DISPLAY_THRESHOLD * 100]
                 
                 # Build warning message
                 warning_msg = (
