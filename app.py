@@ -445,6 +445,14 @@ if holdings:
                 'Portfolio Value': portfolio_value.values
             })
             
+            # Create hover selection that finds nearest point on x-axis
+            hover = alt.selection_point(
+                fields=['Date'],
+                nearest=True,
+                on='mouseover',
+                empty=False
+            )
+            
             # Create Altair chart with custom y-axis and baseline
             base_chart = alt.Chart(chart_data).encode(
                 x=alt.X('Date:T', title='Date'),
@@ -454,12 +462,25 @@ if holdings:
             )
             
             # Line for portfolio value
-            line = base_chart.mark_line(color='#1f77b4', size=2).encode(
+            line = base_chart.mark_line(color='#1f77b4', size=2)
+            
+            # Invisible points for easier tooltip triggering
+            points = base_chart.mark_point(size=100, opacity=0).encode(
                 tooltip=[
-                    alt.Tooltip('Date:T', format='%Y-%m-%d'),
-                    alt.Tooltip('Portfolio Value:Q', format='$,.2f')
+                    alt.Tooltip('Date:T', format='%Y-%m-%d', title='Date'),
+                    alt.Tooltip('Portfolio Value:Q', format='$,.2f', title='Value')
                 ]
+            ).add_params(hover)
+            
+            # Highlight point on hover
+            highlight_point = base_chart.mark_point(size=100, color='#1f77b4').encode(
+                opacity=alt.condition(hover, alt.value(1), alt.value(0))
             )
+            
+            # Vertical rule on hover
+            rule = base_chart.mark_rule(color='gray', opacity=0.3).encode(
+                opacity=alt.condition(hover, alt.value(0.5), alt.value(0))
+            ).transform_filter(hover)
             
             # Horizontal line for initial investment
             initial_line = alt.Chart(pd.DataFrame({
@@ -469,8 +490,8 @@ if holdings:
                 tooltip=alt.value(f'Initial Investment: ${initial_value:,.2f}')
             )
             
-            # Combine charts
-            chart = (line + initial_line).properties(
+            # Combine all layers
+            chart = (line + points + highlight_point + rule + initial_line).properties(
                 height=500
             ).interactive()
             
